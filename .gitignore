@@ -1,0 +1,71 @@
+
+# =========================================================
+# Monorepo: Python (FastAPI) + Node (React/Vite)
+# Ubicación: / (raíz del repositorio)
+# =========================================================
+
+# -------------------------
+# Python / FastAPI
+# -------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*.so
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.egg-info/
+*.egg
+
+# Entornos virtuales (no versionar)
+.venv/
+venv/
+env/
+.uv/                
+
+# Archivos locales 
+.python-version      
+mcp_debug.log
+
+# Node / React / Vite
+
+node_modules/
+dist/
+.build/
+.temp/
+.tmp/
+
+# Cachés de herramientas de bundling
+.vite/
+vite.cache/
+rollup.cache/
+.parcel-cache/
+
+# Reportes/coverage frontend
+coverage/
+lcov.info
+
+# -------------------------
+# Variables de entorno / secretos
+# -------------------------
+# Ignora todos los .env, excepto los de ejemplo
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+
+# -------------------------
+# Sistemas operativos / editores
+# -------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+
+*.log
+logs/
