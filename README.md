@@ -20,7 +20,7 @@ realizadas por el usuario.
   Backend disponible en: http://localhost:8000
   
 3. Instalación del Frontend
-  -Crear .env: Deberás crear un .env en la raíz del proyecto. Debe de contener las  siguientes API KEY: API_KEY=http://localhost:8000
+  -Crear .env: Deberás crear un .env en la raíz del proyecto. Debe de contener las  siguientes API KEY: API_KEY= ....
   -Instalar dependencias: Deberás ejecutar en la terminal, en la raíz del frontend (cmd):  npm install
   -Ejecutar modo desarrollo: Deberás ejecutar en la terminal, en la raíz del frontend (cmd): npm run dev
 
