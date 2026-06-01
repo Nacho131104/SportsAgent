@@ -29,6 +29,18 @@ const formatearMarkdown = (texto: string) => {
     return <p key={i} className="markdown-p">{contenido}</p>;
   });
 };
+// Función auxiliar para convertir el archivo del navegador a Base64
+const ConvertirArchivoABase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => {
+      const base64String = (reader.result as string).split(',')[1];
+      resolve(base64String);
+    };
+    reader.onerror = (error) => reject(error);
+  });
+};
 
 const App: React.FC = () => {
   const [idSesionActual, setIdSesionActual] = useState<string>(Date.now().toString());
@@ -40,6 +52,8 @@ const App: React.FC = () => {
   const [pestanaSidebar, setPestanaSidebar] = useState<'proceso' | 'historial'>('historial');
   const [historialSesiones, setHistorialSesiones] = useState<SesionChat[]>([]);
   const scrollReferencia = useRef<HTMLDivElement>(null);
+
+  const [archivoSeleccionado, setArchivoSeleccionado] = useState<File | null>(null);
 
   useEffect(() => {
     const guardado = localStorage.getItem(CLAVE_STORAGE);
@@ -105,71 +119,82 @@ const App: React.FC = () => {
     if (idSesionActual === id) nuevaConsulta();
   };
 
+const manejarEnvio = async () => {
+  if (!entrada.trim() && !archivoSeleccionado) return; // Permite enviar si hay solo texto o solo archivo
 
-  //gestion del envio de una consulta realizada por el usuario
-  const manejarEnvio = async () => {
-    if (!entrada.trim() || estado !== EstadoAgente.INACTIVO) return;
+  const consultaUsuario = entrada;
+  const instantaneaHistorial = [...mensajes];
+  let moduloActual: EntradaRegistroPensamiento['modulo'] = 'ORQUESTADOR';
+  
+  // Mostrar feedback visual de lo que se envía
+  const textoMensaje = archivoSeleccionado 
+    ? `${consultaUsuario} [Archivo adjunto: ${archivoSeleccionado.name}]`.trim()
+    : consultaUsuario;
 
-    const consultaUsuario = entrada;
-    const instantaneaHistorial = [...mensajes];
-    let moduloActual: EntradaRegistroPensamiento['modulo'] = 'ORQUESTADOR';
+  setMensajes(prev => [...prev, { id: Date.now().toString(), rol: 'usuario', contenido: textoMensaje }]);
+  setEntrada('');
+  setRegistrosActuales([]);
+  
+  try {
+    setEstado(EstadoAgente.PENSANDO);
+    agregarRegistro('ORQUESTADOR', 'Analizando intención...');
+    const plan = await orquestarConsulta(consultaUsuario || "Analiza el archivo adjunto", instantaneaHistorial);
     
-    setMensajes(prev => [...prev, { id: Date.now().toString(), rol: 'usuario', contenido: consultaUsuario }]);
-    setEntrada('');
-    setRegistrosActuales([]);
-    
-    try {
-
-      // se cambia el estado del agente a orquestador, sacando la intencionalidad de la consulta
-      setEstado(EstadoAgente.PENSANDO);
-      agregarRegistro('ORQUESTADOR', 'Analizando intención...');
-      const plan = await orquestarConsulta(consultaUsuario, instantaneaHistorial);
-      
-      //en caso de que no sea deportiva se devuelve un mensaje indicando que no se puede responder a ella
-      if (!plan.esDeporte) {
-        setMensajes(prev => [...prev, { id: Date.now().toString(), rol: 'asistente', contenido: "Lo siento, solo respondo temas deportivos." }]);
-        setEstado(EstadoAgente.INACTIVO); return;
-      }
-
-      //si no, se realiza la busqueda a las fuentes externas (backend) o si es puramente conversacional se responde
-      agregarRegistro('ORQUESTADOR', `Búsqueda: "${plan.consultaOptimizada}"`, 'exito');
-      
-      let fuentesRecolectadas: Fuente[] = [];
-      if (plan.puntoFinal !== 'ninguno') {
-        moduloActual = 'BACKEND';
-        setEstado(EstadoAgente.OBTENIENDO_DATOS);
-        agregarRegistro('BACKEND', `Consultando datos externos...`);
-        fuentesRecolectadas = plan.puntoFinal === 'wikipedia' 
-          ? await obtenerDatosWikipedia(plan.consultaOptimizada)
-          : await obtenerDatosBusqueda(plan.consultaOptimizada);
-        
-        fuentesRecolectadas = fuentesRecolectadas.filter(f => f.contenido && f.contenido.trim().length > 0);
-        agregarRegistro('BACKEND', `${fuentesRecolectadas.length} fuentes encontradas.`, 'exito');
-      }
-
-      //finalmente se responde a la consulta con los datos externos extraidos
-      moduloActual = 'SINTETIZADOR';
-      setEstado(EstadoAgente.SINTETIZANDO);
-      agregarRegistro('SINTETIZADOR', 'Generando reporte deportivo...');
-      
-      const reporte = await sintetizarReporteDeportivo(consultaUsuario, fuentesRecolectadas, instantaneaHistorial);
-      
-      setMensajes(prev => [...prev, {
-        id: Date.now().toString(), rol: 'asistente', contenido: reporte 
-      }]);
-      setEstado(EstadoAgente.INACTIVO);
-
-
-     //si ocurre algun error en el proceso se añade a los registros y se informa por mensaje al usuario
-    } catch (error: any) {
-      agregarRegistro(moduloActual, 'ERROR DE PROCESAMIENTO', 'error');
-      setMensajes(prev => [...prev, {
-        id: Date.now().toString(), rol: 'asistente',
-        contenido: "Hubo un problema técnico al procesar tu reporte deportivo. Intenta de nuevo en unos momentos."
-      }]);
-      setEstado(EstadoAgente.INACTIVO);
+    if (!plan.esDeporte) {
+      setMensajes(prev => [...prev, { id: Date.now().toString(), rol: 'asistente', contenido: "Lo siento, solo respondo temas deportivos." }]);
+      setEstado(EstadoAgente.INACTIVO); return;
     }
-  };
+
+    agregarRegistro('ORQUESTADOR', `Búsqueda: "${plan.consultaOptimizada}"`, 'exito');
+    
+    let fuentesRecolectadas: Fuente[] = [];
+    if (plan.puntoFinal !== 'ninguno') {
+      moduloActual = 'BACKEND';
+      setEstado(EstadoAgente.OBTENIENDO_DATOS);
+      agregarRegistro('BACKEND', `Consultando datos externos...`);
+      fuentesRecolectadas = plan.puntoFinal === 'wikipedia' 
+        ? await obtenerDatosWikipedia(plan.consultaOptimizada)
+        : await obtenerDatosBusqueda(plan.consultaOptimizada);
+      
+      fuentesRecolectadas = fuentesRecolectadas.filter(f => f.contenido && f.contenido.trim().length > 0);
+      agregarRegistro('BACKEND', `${fuentesRecolectadas.length} fuentes encontradas.`, 'exito');
+    }
+
+    // --- PROCESAMIENTO DEL ARCHIVO ---
+    let datosArchivo = undefined;
+    if (archivoSeleccionado) {
+      agregarRegistro('SINTETIZADOR', `Procesando archivo: ${archivoSeleccionado.name}...`);
+      const base64Data = await ConvertirArchivoABase64(archivoSeleccionado);
+      datosArchivo = {
+        base64Data,
+        mimeType: archivoSeleccionado.type
+      };
+    }
+
+    moduloActual = 'SINTETIZADOR';
+    setEstado(EstadoAgente.SINTETIZANDO);
+    agregarRegistro('SINTETIZADOR', 'Generando reporte deportivo...');
+    
+    // Pasamos los datos del archivo al sintetizador
+    const reporte = await sintetizarReporteDeportivo(consultaUsuario, fuentesRecolectadas, instantaneaHistorial, datosArchivo);
+    
+    setMensajes(prev => [...prev, {
+      id: Date.now().toString(), rol: 'asistente', contenido: reporte 
+    }]);
+    
+    // Limpiamos el archivo seleccionado tras enviarlo correctamente
+    setArchivoSeleccionado(null);
+    setEstado(EstadoAgente.INACTIVO);
+
+  } catch (error: any) {
+    agregarRegistro(moduloActual, 'ERROR DE PROCESAMIENTO', 'error');
+    setMensajes(prev => [...prev, {
+      id: Date.now().toString(), rol: 'asistente',
+      contenido: "Hubo un problema técnico al procesar tu reporte deportivo. Intenta de nuevo en unos momentos."
+    }]);
+    setEstado(EstadoAgente.INACTIVO);
+  }
+};
 
   return (
     <div className="app-container">
@@ -256,13 +281,33 @@ const App: React.FC = () => {
         </div>
 
         <div className="input-section">
-          <div className="input-wrapper">
+          {/* Indicador visual si hay un archivo cargado listo para enviarse */}
+          {archivoSeleccionado && (
+            <div style={{ padding: '4px 12px', marginBottom: '8px', background: 'var(--color-slate-800)', borderRadius: '8px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px', width: 'fit-content' }}>
+              <span style={{ color: 'var(--color-emerald-400)' }}>📎 {archivoSeleccionado.name}</span>
+              <button onClick={() => setArchivoSeleccionado(null)} style={{ background: 'none', border: 'none', color: 'var(--color-red-400)', cursor: 'pointer', fontWeight: 'bold' }}>X</button>
+            </div>
+          )}
+
+          <div className="input-wrapper" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* Input de archivo oculto pero controlable */}
+            <label className="btn-file-upload" style={{ cursor: 'pointer', padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--color-slate-800)', borderRadius: '50%' }}>
+              <Plus size={18} color="var(--color-slate-400)" />
+              <input 
+                type="file" 
+                onChange={(e) => e.target.files && setArchivoSeleccionado(e.target.files[0])}
+                accept=".pdf, .png, .jpg, .jpeg, .csv, .txt"
+                style={{ display: 'none' }} 
+              />
+            </label>
+
             <input 
               type="text" value={entrada} onChange={(e) => setEntrada(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && manejarEnvio()}
-              placeholder="¿Cómo va la liga española?"
+              placeholder="¿Cómo va la liga o analiza este archivo...?"
               className="text-input"
+              style={{ flex: 1 }}
             />
-            <button onClick={manejarEnvio} disabled={estado !== EstadoAgente.INACTIVO || !entrada.trim()} className="btn-send">
+            <button onClick={manejarEnvio} disabled={estado !== EstadoAgente.INACTIVO || (!entrada.trim() && !archivoSeleccionado)} className="btn-send">
               Consultar
             </button>
           </div>

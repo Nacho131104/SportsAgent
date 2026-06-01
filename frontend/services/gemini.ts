@@ -20,6 +20,8 @@ const limpiarContenidoFuente = (texto: string): string => {
     .slice(0, 3500); 
 };
 
+
+
 const conReintento = async <T>(fn: () => Promise<T>, reintentos = 3, demora = 2000): Promise<T> => {
   try {
     return await fn();
@@ -61,6 +63,8 @@ export const orquestarConsulta = async (consulta: string, historial: Mensaje[]):
   
   Devuelve JSON con esDeporte, puntoFinal, consultaOptimizada (en 3ra persona si es búsqueda) y razonamiento.`;
 
+
+
   return conReintento(async () => {
     const respuesta = await ai.models.generateContent({
       model: MODELO_ORQUESTADOR,
@@ -77,7 +81,7 @@ export const orquestarConsulta = async (consulta: string, historial: Mensaje[]):
           },
           required: ["esDeporte", "puntoFinal", "consultaOptimizada", "razonamiento"]
         }
-      }
+      },
     });
     
     const res = JSON.parse(respuesta.text || "{}");
@@ -87,47 +91,79 @@ export const orquestarConsulta = async (consulta: string, historial: Mensaje[]):
 };
 
 
-/*
-funcion para que segun la consulta, las fuentes externas, y el historial de mensajes 
-se genere la respuesta final al usuario sobre la consulta
-*/
-export const sintetizarReporteDeportivo = async (consulta: string, fuentes: Fuente[], historial: Mensaje[]): Promise<string> => {
+export const sintetizarReporteDeportivo = async (
+  consulta: string, 
+  fuentes: Fuente[], 
+  historial: Mensaje[],
+  archivoBinario?: { base64Data: string; mimeType: string },
+  textoArchivo?: string // Para el contenido de archivos de texto plano (.txt, .csv)
+): Promise<string> => {
   const historialReciente = historial.slice(-3).map(m => `${m.rol === 'usuario' ? 'U' : 'A'}: ${m.contenido}`).join('\n');
   
-  const contextoLimpio = fuentes.length > 0 
-    ? fuentes.map(f => `[CONTEXTO]: ${limpiarContenidoFuente(f.contenido)}`).join('\n\n')
-    : "Sin datos externos nuevos. Usa tu conocimiento base o responde al saludo.";
+  //Formateamos el contexto que viene de internet
+  const contextoInternet = fuentes.length > 0 
+    ? fuentes.map(f => `[DATO DE INTERNET]: ${limpiarContenidoFuente(f.contenido)}`).join('\n\n')
+    : "No se encontraron datos externos nuevos en internet.";
 
+  //Formateamos el contexto exclusivo del archivo del usuario
+  let contextoArchivoEspecial = "El usuario no ha adjuntado ningún archivo de texto para esta consulta.";
+  if (textoArchivo) {
+    contextoArchivoEspecial = `[CONTENIDO REAL DEL ARCHIVO DEL USUARIO]:\n${textoArchivo}`;
+  }
+
+  // Creamos un prompt estructurado por bloques inconfundibles
   const prompt = `
-  HISTORIAL:
+  HISTORIAL DE CONVERSACIÓN RECIENTE:
   ${historialReciente}
 
-  CONOCIMIENTO DISPONIBLE:
-  ${contextoLimpio}
+  =======================================================
+  BLOQUE 1: INFORMACIÓN COMPLEMENTARIA DE INTERNET (WEB/WIKIPEDIA)
+  =======================================================
+  ${contextoInternet}
 
-  PREGUNTA: "${consulta}"`;
+  =======================================================
+  BLOQUE 2: CONTENIDO REAL DEL ARCHIVO SUBIDO POR EL USUARIO
+  =======================================================
+  ${contextoArchivoEspecial}
+  ${archivoBinario ? "[Nota: Se ha adjuntado un archivo multimedia/PDF procesado en formato binario]" : ""}
+
+  =======================================================
+  PREGUNTA O MANDATO DEL USUARIO:
+  "${consulta}"
+  =======================================================`;
+
+  const contenidosConsulta: any[] = [prompt];
+
+  if (archivoBinario) {
+    contenidosConsulta.unshift({
+      inlineData: {
+        mimeType: archivoBinario.mimeType,
+        data: archivoBinario.base64Data
+      }
+    });
+  }
 
   return conReintento(async () => {
     const usarThinking = prompt.length > 200;
 
     const respuesta = await ai.models.generateContent({
       model: MODELO_SINTETIZADOR,
-      contents: prompt,
+      contents: contenidosConsulta,
       config: { 
-        temperature: 0.7, //Temperatura del modelo alta para que suene menos "robótico"
+        temperature: 0.4, //Bajamos levemente para asegurar rigurosidad con las fuentes
         ...(usarThinking ? { 
           maxOutputTokens: 4000,
           thinkingConfig: { thinkingBudget: 2000 } 
         } : {}),
         systemInstruction: `Eres un analista deportivo de élite con una personalidad profesional pero cercana.
         
-        REGLAS DE RESPUESTA:
-        1. Si el usuario te saluda o pregunta quién eres, preséntate como su Agente de Inteligencia Deportiva.
-        2. Sé breve en interacciones puramente sociales.
-        3. NO menciones fuentes ni procesos de búsqueda.
-        4. Si el mensaje es una consulta deportiva, sé autoritario y preciso usando negritas en nombres y datos clave.
-        5. Mantén siempre el foco en el mundo del deporte.
-        6. Debes de aportar la máxima información posible que creas necesaria de la extraida externamente.`
+        REGLAS CRÍTICAS DE CONTEXTO Y RAZONAMIENTO:
+        1. Tienes dos bloques de datos: 'BLOQUE 1' (Internet) y 'BLOQUE 2' (El archivo del usuario). Son fuentes completamente distintas.
+        2. Si el usuario te pregunta si el archivo habla de un tema o jugador específico, analiza estrictamente el 'BLOQUE 2'. Si el tema NO está ahí, debes declarar explícitamente que el archivo NO contiene esa información.
+        3. ¡Usa el 'BLOQUE 1' (Internet) para enriquecer tu respuesta! Si el archivo no habla del jugador, puedes aclararlo y acto seguido aportar los datos del jugador obtenidos de internet para ayudar al usuario. 
+           Ejemplo: "El archivo que subiste trata sobre tus prácticas en Teknei y no menciona a Robert Lewandowski. No obstante, revisando datos de actualidad, te comento que Lewandowski es un delantero polaco que juega en el F.C. Barcelona..."
+        4. NUNCA asumas ni afirmes que los datos obtenidos en el Bloque 1 pertenecen o están escritos dentro del Bloque 2. Sé transparente con el usuario sobre la procedencia de cada dato.
+        5. Mantén el foco deportivo, usa negritas en datos clave y nombres propios.`,
       }
     });
 

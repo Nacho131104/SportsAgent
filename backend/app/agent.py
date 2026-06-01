@@ -47,6 +47,8 @@ def obtener_respuesta(prompt) :
     """
     logging.info(f"Prompt: {prompt}")
     try:
+
+        #file = client.files.upload()
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=(
